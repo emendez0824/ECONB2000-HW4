@@ -1,0 +1,228 @@
+---
+title: "Homework 4"
+author: "Emmanuel Mendez"
+date: "10/14/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library("sandwich")
+library("lmtest")
+load("acs2017_ny_data.RData")
+attach(acs2017_ny)
+
+```
+
+## Ordinary Least Squares
+
+This homework was done in a study group with Erik Carlson, Emily Vasquez, and Joe Correa.
+
+First we limited our sample by including only those within the age range of 25-55, those that were in the labor force, and worked a sufficnent number of weeks and hours.  This is because those outside this range will be outliers in regards to relevant variables such as Income.
+
+```{r, message=FALSE}
+use_varb <- (AGE >= 25) & (AGE <= 55) & (LABFORCE == 2) & (WKSWORK2 > 4) & (UHRSWORK >= 35)
+dat_use <- subset(acs2017_ny,use_varb) # 
+detach(acs2017_ny)
+attach(dat_use)
+```
+
+For our analysis we wished to first find the means of wage in regard to certain educations across gender.  
+So we found the mean wage for females with no high school education and those with advanced degrees.  Then we found the same mean wages for males with the same educations.
+
+
+```{r }
+print(c("The mean wage for females with only a high school education is", round(mean(INCWAGE[female==1|educ_hs==1]),2)))
+print(c("The mean wage for females with an advanced degree is", round(mean(INCWAGE[female==1|educ_advdeg==1]),2)))
+
+print(c("The mean wage for males with only a high school education is", round(mean(INCWAGE[female==0|educ_hs==1]),2)))
+print(c("The mean wage for males with an advanced degree is", round(mean(INCWAGE[female==0|educ_advdeg==1]),2)))
+
+```
+From this we found that there was a noticable difference between the mean wages between the mean wages when comparng females and males.  As females with advanced degree's mean wage was only slightly greater than a male with no high school education.  Therefore we conducted a more robust OLS regression analysis.
+
+When investigating the variable of gender it is important to control for any omitted variable bias, thus regressors for education and age were added.
+In order to not have perfect collinearity and avoid the dummy variable trap the variable no_hs was ommitted.  This is similar to how we do not have a separate binary variable for male when we already have one for female.
+
+```{r }
+
+model_temp1 <- lm(INCWAGE ~ AGE + female + educ_hs + educ_somecoll + educ_college + educ_advdeg)
+summary(model_temp1)
+
+
+```
+
+
+```{r}
+# subset in order to plot...
+NNobs <- length(INCWAGE)
+set.seed(12345) # just so you can replicate and get same "random" choices
+graph_obs <- (runif(NNobs) < 0.1) # so something like just 1/10 as many obs
+dat_graph <-subset(dat_use,graph_obs)
+
+plot(INCWAGE ~ jitter(AGE, factor = 2), pch = 16, col = rgb(1, 0.2, 0.6, alpha = 0.2), main = "Wage vs Age for a female with an advanced degree", xlab = "Age", ylab = "Wage", ylim = c(60000,150000), data = dat_graph)
+# d
+
+# change this line to fit your regression
+to_be_predicted2 <- data.frame(AGE = 25:55, female = 1,  educ_hs = 0, educ_somecoll = 0, educ_college = 0, educ_advdeg = 1)
+to_be_predicted2$yhat <- predict(model_temp1, newdata = to_be_predicted2)
+
+lines(yhat ~ AGE, data = to_be_predicted2)
+
+```
+
+
+
+
+
+We wished to test whether there is a gender disparity in regards to wage.
+
+The hypothesis is that when we look at the wage variable, that 
+   H0 B2 == 0  
+   The null hypothesis is that the regressor for the variable female is equal to 0.  Therefore that that there is no statistical difference between genders in regards to wage.
+  
+   Ha B2 != 0
+  Our alternative hypothesis is that the regressor for the variable female is not equal to zero. Therefore we would reject the null hypothesis and we would assume that there is a difference in wage due to gender.
+  
+To find the t value the regressor is divided by the standard error:
+  Where -25664.63/719.00  = -35.695
+  
+  
+```{r}
+length(female)
+t<-- -25664.63/719.00
+2*pt ( -abs(t) ,60060-1)
+```
+
+
+Our p value is less than 2e-16 thus the result is significant at p<0.05 and therefore we can say with 95% percent confidence that we reject our null hypothesis.
+
+
+It cannot be assumed that the distribution is homoskedastic, that the disturbances are same across the independent variables.  Thus a robust regression with heterskedasticity was done using coeftest.
+
+```{r } 
+  coeftest(model_temp1,vcovHC)
+```
+
+Using a robust regression there are no significant differences, however it is more appropriate since homoskedasticity is very rare and cannot be assumed.
+
+
+Following the regression with INCWAGE we wished to instead use the log of wage to show the effects in regards to percent changes rather than absolute numbers.  We also wished to show the difference in the regressor for age after gender and education is accounted for.
+
+```{r }
+
+model_temp2 <- lm(log1p(INCWAGE) ~ AGE)
+coeftest(model_temp2,vcovHC)
+```
+
+Using the log of wage shows that every increase of 1 in age, wage increases by 0.23%.
+Furthermore with p<0.05 this increase in wage is statistically significant with 95% confidence.
+
+```{r}
+# subset in order to plot...
+NNobs <- length(INCWAGE)
+set.seed(12345) # just so you can replicate and get same "random" choices
+graph_obs <- (runif(NNobs) < 0.1) # so something like just 1/10 as many obs
+dat_graph <-subset(dat_use,graph_obs)
+
+plot(log1p(INCWAGE) ~ jitter(AGE, factor = 2), pch = 16, col = rgb(1, 0.2, 0.6, alpha = 0.2), main = "Wage vs Age", xlab = "Age", ylab = "Log Wage", ylim = c(0,14), data = dat_graph)
+# d
+
+# change this line to fit your regression
+to_be_predicted2 <- data.frame(AGE = 25:55)
+to_be_predicted2$yhat <- predict(model_temp2, newdata = to_be_predicted2)
+
+lines(yhat ~ AGE, data = to_be_predicted2)
+
+```
+
+
+Following this bivariate regression we wished to include other control variables to reduce the influence of omitted variable bias.
+
+```{r}
+model_temp3 <- lm(log1p(INCWAGE) ~ AGE + female + educ_hs + educ_somecoll + educ_college + educ_advdeg)
+coeftest(model_temp3,vcovHC)
+
+```
+
+Including for these control variables shows that age has both a larger and more statistically significant effect on wage than when just the bivarate analysis was conducted.  
+Each increase in age instead increases wage by 0.79% and with a t value of 7.12 and a p value of 1*10^-12 it is statistically significant with at least 95% confidence.
+
+
+```{r}
+# subset in order to plot...
+NNobs <- length(INCWAGE)
+set.seed(12345) # just so you can replicate and get same "random" choices
+graph_obs <- (runif(NNobs) < 0.1) # so something like just 1/10 as many obs
+dat_graph <-subset(dat_use,graph_obs)
+
+plot(log1p(INCWAGE) ~ jitter(AGE, factor = 2), pch = 16, col = rgb(1, 0.2, 0.6, alpha = 0.2), main = "Wage vs Age for a female with an advanced degree", xlab = "Age", ylab = "Log Wage", ylim = c(0,14), data = dat_graph)
+# d
+
+# change this line to fit your regression
+to_be_predicted2 <- data.frame(AGE = 25:55, female = 1,  educ_hs = 0, educ_somecoll = 0, educ_college = 0, educ_advdeg = 1)
+to_be_predicted2$yhat <- predict(model_temp3, newdata = to_be_predicted2)
+
+lines(yhat ~ AGE, data = to_be_predicted2)
+
+```
+
+Folowing this we conducted a regression including for whether the individual is hispanic dominican.
+
+```{r }
+
+model_temp4 <- lm(INCWAGE ~ AGE + female + educ_hs + educ_somecoll + educ_college + educ_advdeg + Hisp_DomR)
+summary(model_temp4)
+
+```
+
+There is a statistically significant decrease in net income for Hispanic dominicans.  We wanted to investigate compounding negative factors by plotting them.
+
+Following the regression we wanted to predict the wage of a hispanic dominican female with a high school education from ages 25 to 55 and compare the result to a prediction that does not include ethnicity as a factor.
+
+The first plot is for females without regard for race.
+
+```{r}
+# subset in order to plot...
+NNobs <- length(INCWAGE)
+set.seed(12345) # just so you can replicate and get same "random" choices
+graph_obs <- (runif(NNobs) < 0.1) # so something like just 1/10 as many obs
+dat_graph <-subset(dat_use,graph_obs)
+
+plot(INCWAGE ~ jitter(AGE, factor = 2), pch = 16, col = rgb(1, 0.2, 0.6, alpha = 0.2), main = "Wage vs Age, Hispanic dominican female with a highschool education", xlab = "Age", ylab = "Wage", ylim = c(0,50000), data = dat_graph)
+# d
+
+# change this line to fit your regression
+to_be_predicted2 <- data.frame(AGE = 25:55, female = 1,  educ_hs = 1, educ_somecoll = 0, educ_college = 0, educ_advdeg = 0)
+to_be_predicted2$yhat <- predict(model_temp1, newdata = to_be_predicted2)
+
+lines(yhat ~ AGE, data = to_be_predicted2)
+
+```
+
+
+The second plot is for females including hispanic dominican ethnicity.
+
+```{r}
+# subset in order to plot...
+NNobs <- length(INCWAGE)
+set.seed(12345) # just so you can replicate and get same "random" choices
+graph_obs <- (runif(NNobs) < 0.1) # so something like just 1/10 as many obs
+dat_graph <-subset(dat_use,graph_obs)
+
+plot(INCWAGE ~ jitter(AGE, factor = 2), pch = 16, col = rgb(1, 0.2, 0.6, alpha = 0.2), main = "Wage vs Age, Hispanic dominican female with a highschool education", xlab = "Age", ylab = "Wage", ylim = c(0,50000), data = dat_graph)
+# d
+
+# change this line to fit your regression
+to_be_predicted2 <- data.frame(AGE = 25:55, female = 1,  educ_hs = 1, educ_somecoll = 0, educ_college = 0, educ_advdeg = 0, Hisp_DomR = 1)
+to_be_predicted2$yhat <- predict(model_temp4, newdata = to_be_predicted2)
+
+lines(yhat ~ AGE, data = to_be_predicted2)
+
+```
+
+
+The result was that there was a significant differences in wage between Hispanic dominican females with a high school education and for the general female populace with a high school education.  However these differences led to odd results on the lower end of the trend line, where it is approximated that a 25 year old woman who is employed, works multiple weeks for over 35 hours makes no income.  However this obviously not the case, and is more a result of the overall trend not fitting the lower section of the dataset.
+
+For possible future analysis, another interesting possibility would be analyzing using the information of individuals' places of birth.  Rather than just ethnicity, it may produce interesting results looking into data for people born outside the United States.  It may also be interesting comparing the income of an indiviual compared to their parent's income, looking into the opportunities of generational wealth or poverty.
+
